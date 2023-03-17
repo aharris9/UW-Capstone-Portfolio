@@ -1,0 +1,316 @@
+---
+title: "Biost 544 Project Report: Wine Quality"
+author: "Alexis Harris"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+# Use opts_chunk$set() to set global knit options for this document
+knitr::opts_chunk$set(echo=FALSE, include = FALSE, message=FALSE, warnings=TRUE, 
+                      fig.align='center')
+
+# Load packages
+library(tidyverse) #for ggplot2, dplyr, etc
+library(kableExtra) #for making nice-looking tables
+library(rigr)
+library(purrr)
+library(Hmisc)
+library(tableone) # an useful package to generate descriptive tables
+library(car)
+library(ranger)
+
+# Set working directory
+setwd("~/Documents/UW Classes/Year 2/Fall22/BIOST 544")
+
+# r, echo=F, fig.width=5, fig.height=5, fig.cap="An example of a scatterplot" 
+```
+## Introduction
+
+Wine exports have been increasing worldwide and the beverage is now enjoyed by a wider range of consumers compared to previous decades. Due to rapid growth in the wine industry, investors and producers are utilizing new data driven technology for both wine making and selling. We explored two datasets related to red and white variants of the Portuguese *vinho verde* wine. The data were collected from May 2004 to February 2007 were tested at the official certification entity (CVRVV). The data were recorded by a computerized system (iLab) which processes laboratory and sensory analysis of the wine samples. The final datasets contain a distinct wine sample per row and physicochemical results in the columns, which will serve as quantitative predictors for this analysis. The quality of the each sample was recorded on a scale from 0 (very bad) to 10 (excellent). This quality metric was evaluated by at least three blinded assessors from which the median of the score was recorded. This quality metric is used as the response variable in the analysis. The red wine dataset contains 1599 samples and the white wine dataset contains 4898 samples, and there are no missing values. A statistic summary of these predictors can be viewed in Table 1 in the Tables and Figures section; Additionally, the distribution of quality scores for wine type is displayed in Figure 1. We see from this figure that scores follow an approximately normal distribution. We performed separate sensitivity analyses for the red wine and white wine dataset to determine which physicochemical parameters predict quality score.
+
+## Methods
+
+In order to preserve the information from the response variable quality score, we first utilized multiple linear regression and used all twelve predictors for each analysis for the red wine and white wine. Once these full models were fitted, we used a stepwise forward selection with AIC and BIC. Following the MLR analyses, we investigated random forest models on the two datasets and utilized training and test sets to fit the these models.
+
+### Multiple Linear Regression 
+
+First we started by implementing MLR on the entire red wine dataset. From this model, our F-statistic obtained a p-value < 2.2e-16 indicating there are physicochemical parameters found associated with the quality score. These predictors on the full model are: volatile acidity, chlorides, total sulfur dioxide, sulfates, and alcohol percentage. While the model found these predictors significant, we obtained an adjusted R-squared of approximately 0.36, which is poor prediction. If we add stepwise function to this dataset with AIC, we find the predictors alcohol percentage, volatile acidity, phosphates, total sulfur dioxide, chlorides, pH, and free sulfur dioxide are significant predictors. This result turned to be different from what we gathered from the full model. Additionally, we obtained nearly the same AIC and adjusted r-squared value around .36. Using stepwise forward BIC, we found fewer significant predictors: alcohol percentage, volatile acidity, sulfates, total sulfur dioxide, chlorides, and pH. BIC stepwise forward also had a similar adjusted r-squared at 0.36. Repeating this process for the white wine dataset, we also observe consistent adjusted r-squared value of approximately 0.28 for the full MLR model and the stepwise forward AIC/BIC. 
+
+### Random Forest Model
+
+Because the multiple linear regression models did not perform well, we also investigated using a random forest (RF) model on both datasets. For both models, we used the non-parametric Altman method to calculate significant p-values. For this section, we split our data into training and test set for each analysis with 70% of the data being used for training and 30% of the data used for testing. 
+
+Table 2 and Table 3 in the Tables and Figures section display the Altman calculated p-values corresponding to the physicochemical parameters for red wine and white wine respectively. The significant parameters for red wine is reported as alcohol percentage, sulfates, and volatile acidity. Using this model we obtained a misclassification error rate of 0.425. The random forest white wine model reported significance for alcohol percentage, sulfates, volatile acidity, citric acid, chlorides, and pH. Similar to the previous model, this model reported a misclassification rate of 0.453. So unfortunately, the random tree models also did not perform well for prediction quality scores for red and white wine.
+
+## Discussion
+
+While our analyses did not produce accurate predictions, there are a few interesting results. We observed on average that the models for the white wine predicted worse than the red wine despite having a dataset that has 3299 more samples. The white wine models adjusted r-squared was lower and misclassification error was higher than the red wine models. Another interesting result from the random forest models are the significant predictors. The random forest model for the red wine found alcohol percentage, sulfates, and volatile acidity as predictors for quality. On the other hand, the RF model for white wine found alcohol percentage, sulfates, volatile acidity, citric acid, chlorides, and pH as significant predictors. This perhaps suggests that the acidic physicochemicals found in white wine have a larger significance on taste than in red wine. 
+
+These models probably had a difficult time predicting given the nature of the response variable. We see in Figure 1 there is a normal distribution of the scores for both white and red wine. This suggests most of the sample were average, so discovering the distinction from a wine sample that scored a 4 might not vary significantly from a sample that scored a 6. Perhaps another interesting model would be to predict samples that would be outliers in this dataset. This would model would predict based off of the covariates whether a sample would be extremely good or very bad. 
+
+```{r Load Data, include=FALSE}
+#===============================================================================
+##--Load Data--
+winequality_red <- read.csv2("winequality-red.csv")
+winequality_white <- read.csv2("winequality-white.csv")
+
+## Make data numeric & convert back to dataframe
+winequality_red <- sapply(winequality_red, as.numeric) 
+winequality_red <- as.data.frame(winequality_red)
+
+winequality_white <- sapply(winequality_white, as.numeric)
+winequality_white <- as.data.frame(winequality_white)
+
+## looking at pairs, may see some linear relationships with quality outcome
+pairs(winequality_red)
+pairs(winequality_white)
+
+## Create Training and test sets 70% and 30% observations respectively
+set.seed(9)
+## Red Wine
+a.red <- sample(1:1599,1119,replace=FALSE) # .7*1599 ~ 1119.3
+training.red <- winequality_red[a.red,] 
+test.red <- winequality_red[-a.red,]
+## White Wine
+a.white <- sample(1:4898,3428,replace=FALSE) # .7*4898 ~ 3428.6
+training.white <- winequality_white[a.white,] 
+test.white <- winequality_white[-a.white,]
+
+```
+
+```{r MLR Red Wine, include=FALSE}
+#===============================================================================
+##--MLR Red Wine Dataset--
+
+lm.all.red <- lm(quality ~ ., data = as.data.frame(winequality_red)) # fits the full model
+summary(lm.all.red)
+summary(lm.all.red)$r.squared
+AIC(lm.all.red)
+vif(lm.all.red) # computes the variance inflation factors
+
+intercept_only_red <- lm(quality ~ 1 , data = as.data.frame(winequality_red)) # the model that has only the intercept parameter
+  
+forward.red <- step(intercept_only_red, direction="forward", scope=formula(lm.all.red), trace=0)
+forward.red$anova # displays the forward selection procedure and the variables selected at each step
+forward.red$coefficients # displays the coefficients for the best subset model fitted
+summary(forward.red)
+
+#BIC Forward step
+forward_red_BIC=step(intercept_only_red, direction="forward", scope=formula(lm.all.red), trace=0, k= log(nrow(winequality_red))) 
+forward_red_BIC$anova
+forward_red_BIC$coefficients
+summary(forward_red_BIC)
+
+```
+
+```{r MLR White Wine, include=FALSE}
+#===============================================================================
+##--MLR White Wine Dataset--
+
+lm.all.white <- lm(quality ~ ., data = as.data.frame(winequality_white)) # fits the full model
+summary(lm.all.white)
+summary(lm.all.white)$r.squared
+AIC(lm.all.white)
+vif(lm.all.white) # computes the variance inflation factors
+
+intercept_only_white <- lm(quality ~ 1 , data = as.data.frame(winequality_white)) # the model that has only the intercept parameter
+  
+forward.white <- step(intercept_only_white, direction="forward", scope=formula(lm.all.white), trace=0)
+forward.white$anova # displays the forward selection procedure and the variables selected at each step
+forward.white$coefficients # displays the coefficients for the best subset model fitted
+summary(forward.white)
+
+#BIC Forward step
+forward_white_BIC=step(intercept_only_white, direction="forward", scope=formula(lm.all.white), trace=0, k= log(nrow(winequality_white))) 
+forward_white_BIC$anova
+forward_white_BIC$coefficients
+summary(forward_white_BIC)
+
+```
+
+```{r Random Forest Red Wine}
+#===============================================================================
+##-- Random Forest Red Wine Dataset--
+
+set.seed(10)
+
+# Fitting the random forest on the training data
+rf.red <- ranger(quality ~ ., data = training.red, importance = "permutation", classification=TRUE) 
+
+# Finding which predictors are significant
+rf_pvals_red <- importance_pvalues(rf.red, method = "altmann", formula = quality ~ ., data = training.red)
+# alcohol, sulphates, volatile.acidity
+
+# Predicting the responses in the test set and obtaining the misclassification
+# error rate
+pred_rf0_red <- predict(rf.red, data=as.data.frame(test.red[,-12]), type="response")
+pred_rf_red <- pred_rf0_red$predictions
+obs_test_red <- test.red[,12]
+err_rf_red <- mean((obs_test_red - pred_rf_red)^2)  # 0.425
+```
+
+```{r Random Forest White Wine}
+#===============================================================================
+##-- Random Forest White Wine Dataset--
+
+set.seed(10)
+
+# Fitting the random forest on the training data
+rf.white <- ranger(quality ~ ., data = training.white, importance = "permutation", classification=TRUE) 
+
+# Finding which predictors are significant
+rf_pvals_white <- importance_pvalues(rf.white, method = "altmann", formula = quality ~ ., data = training.white)
+# alcohol, sulphates, volatile.acidity, citric.acid, chlorides, pH
+
+# Predicting the responses in the test set and obtaining the misclassification
+# error rate
+pred_rf0_white <- predict(rf.white, data=as.data.frame(test.white[,-12]), type="response")
+pred_rf_white <- pred_rf0_white$predictions
+obs_test_white <- test.white[,12]
+err_rf_white <- mean((obs_test_white - pred_rf_white)^2)  # 0.453
+```
+
+```{r Table 1, include=FALSE, appendix = TRUE, warning=FALSE}
+### -----------------------------------------------------------
+### Create Table 1: Descriptive Statistics 
+
+# creating temp df to add type of wine 
+red_tab <- winequality_red %>%
+  add_column(wine_type = "red")
+white_tab <- winequality_white %>%
+  add_column(wine_type = "white")
+
+tab1_data <- rbind(red_tab,white_tab)
+#tab1_data <- subset(tab1_data, select = -c(female, breed) )
+
+# data pre-processing
+# Categorical variables as factors with meaningful labels
+tab1_data$wine_type <- factor(tab1_data$wine_type, c("red","white"), c("Red Wine", "White Wine"))
+# turn numeric variables to int (was recorded as chr)
+tab1_data[-13] <- sapply(tab1_data[-13], as.numeric)
+
+
+# Continuous variables, always inspect their distributions
+hist(tab1_data$fixed.acidity)
+hist(tab1_data$volatile.acidity) #skewed - so median IQR
+hist(tab1_data$citric.acid)
+hist(tab1_data$residual.sugar)
+hist(tab1_data$chlorides)
+hist(tab1_data$free.sulfur.dioxide)
+hist(tab1_data$total.sulfur.dioxide)
+hist(tab1_data$density)
+hist(tab1_data$pH)
+hist(tab1_data$sulphates)
+hist(tab1_data$alcohol)
+hist(tab1_data$quality)
+
+# Label each variable reported in Table 1 using the function label from Hmisc package
+var_for_table1 <- colnames(tab1_data)
+
+label(tab1_data[,var_for_table1]) <- list('Fixed acidity (g(tartaric acid)/$dm^3$)',
+                                          'Volatile acidity (g(acetic acid)/$dm^3$)',
+                                          'Citric acid (g/$dm^3$)',
+                                          'Residual sugar (g/$dm^3$)',
+                                          'Chlorides (g(sodium chloride)/$dm^3$)',
+                                          'Free sulfur dioxide (mg/$dm^3$)', 
+                                          'Total sulfur dioxide (mg/$dm^3$)', 
+                                          'Density (g/$cm^3$)',
+                                          'pH',
+                                          'Sulphates (g(potassium sulphate)/$dm^3$)', 
+                                          'Alcohol (vol.%)',
+                                          'Quality Score',
+                                          'Wine Type')
+
+# Note that this is a list of labels
+# You may notice I used $ $. This is to let rmarkdown know the text inside is
+# a formula
+```
+
+## Tables and Figures
+
+```{r Table 1 Display,include=TRUE, appendix = TRUE, warning=FALSE}
+
+# Table 1 was generated by using the CreateTableone function from the package
+# "tableone". We could specify 
+# data: specific the dataset 
+# vars: variable (column names) to be included in the table
+# strata: whether or not stratifying by any factors
+# test: whether or not statistical test is performed
+# includeNA: whether or not NA category is displayed
+# addOverall: whether or not descriptive statistics from the overall sample is included
+# there are other parameters of the table that can be controlled when printing 
+# the table e.g. whether or not to use variable labels rather than variable column
+# names we specified, any nonnormal variables (so median [IQR] is reported), and
+# the number of digits, etc. See R documentation ?CreateTableOne and 
+# ?print.TableOne for details.
+
+tbl1 <- CreateTableOne(data = tab1_data, vars = var_for_table1[-c(12,13)], strata = 'wine_type',
+                       test = FALSE, includeNA = TRUE, addOverall = TRUE) %>% 
+  print(printToggle = FALSE,varLabels = TRUE,contDigits = 1, 
+        catDigits = 0)
+rownames(tbl1) <- gsub('%','\\\\%',rownames(tbl1)) # rmarkdown knits PDF based on
+# Latex, qnd signs like %, $, \ have special meaning in Latex. To let Latex display
+# these characters, we need to add \\\\ before those characters.
+rownames(tbl1)[1] <- 'N'
+# rownames(tbl1)[11] <- ' Missing'
+
+# kable is a powerful function to display tables using Rmarkdown.
+# We could specify that
+# "format = latex": since the output is PDF 
+# "align = c" means texts in the table are centered aligned
+# "vline = ''" means no vertical lines are present in the table
+# escape = FALSE means special characters like %, $ are treated as Latex code.
+# linesep = '' means we don't want any spacing between two rows of the table.
+# For those who wants to learn more about how to nicely display a table by
+# using Rmarkdown, please check a very useful resources 
+# "https://bookdown.org/yihui/rmarkdown-cookbook/kable.html"
+
+kable(tbl1, format = 'latex', align = 'c', vline = '',booktabs = TRUE, caption = 
+        'Baseline physicochemical statistics per wine type.',
+      escape = FALSE,linesep = "") %>%
+    add_header_above(c('Attributes' = 2,'Wine Type' = 2),bold = TRUE) %>%
+    # add header
+    add_indent((1:nrow(tbl1))[substr(rownames(tbl1),1,1) == ' ']) %>% 
+    # add some indents for those categorical variables
+    kable_styling(latex_options = c('scale_down','HOLD_position')) %>% 
+    # "scale down" automatically choose the size of the table to best fit the page
+    footnote(general = 
+    'The most common physicochemical tests were selected for this dataset',
+    threeparttable = TRUE)
+    # add footnote
+```
+
+```{r Figure 1, include=TRUE, warning=FALSE}
+ggplot(tab1_data, aes(quality, fill = wine_type)) + 
+  geom_bar(alpha = 0.7, position = "identity") +
+  scale_fill_manual(values = c("red4", "ivory3")) +
+  theme_linedraw() +
+  xlim(0,10) +
+  labs(x = "Quality Score", y = "Frequency (wine samples)",
+       title = "Figure 1: Red and White wine quality preferences",
+       fill = "Wine Type")
+```
+
+```{r Table 2, include=TRUE}
+## Important coefficents RF red wine
+knitr::kable(round(rf_pvals_red, 3), caption = "Red Wine Coefficents from RF Model") %>%
+  kable_styling(latex_options = c('scale_down','HOLD_position')) 
+  
+```
+
+```{r Table 3, include=TRUE}
+## Important coefficents RF white wine
+knitr::kable(round(rf_pvals_white, 3), caption = "White Wine Coefficents from RF Model") %>%
+  kable_styling(latex_options = c('scale_down','HOLD_position')) 
+```
+
+
+**Reference** 
+
+P. Cortez, A. Cerdeira, F. Almeida, T. Matos and J. Reis. Modeling wine preferences by data mining from physicochemical properties. In Decision Support Systems, Elsevier, 47(4):547-553. ISSN: 0167-9236.
+
+## Code appendix
+
+```{r code appendix, ref.label=knitr::all_labels(), echo=TRUE, include = TRUE, eval=FALSE}
+```
