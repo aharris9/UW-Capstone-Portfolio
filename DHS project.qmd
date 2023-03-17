@@ -1,0 +1,262 @@
+---
+title: "CSSS 554 Project: Investigating Egyptian DHS Child Mortality Rates"
+author: "Alexis Harris"
+format: pdf
+editor: visual
+---
+
+```{r setup, include = FALSE}
+# Use opts_chunk$set() to set global knit options for this document
+knitr::opts_chunk$set(echo=FALSE, include = FALSE, 
+                      message=FALSE, warning=FALSE,
+                      fig.align='center')
+
+# Load packages
+pacman::p_load(tidyverse, kableExtra, SUMMER, ggplot2, patchwork, rdhs, haven,
+               rgdal, readstata13, gridExtra)
+```
+
+```{r preprocess data}
+
+filenameEgypt <- "EGBR61DT/EGBR61FL.DTA"
+birthsEgypt <- read.dta13(filenameEgypt, generate.factors = TRUE)
+
+# adjacency matrix based on admin1
+mapfilename <- "shps/sdr_subnational_data_dhs_2014.shp"
+geo <- readOGR(mapfilename, verbose = FALSE)
+Amat <- getAmat(geo, geo$REGNAME)
+
+```
+
+# Introduction
+
+The 2014 Egyptian Demographic and Health Survey is the latest, complete series of nationally representative population and health surveys conducted in Egypt. The survey was conducted on behalf of the Ministry of Health and Population (MOHP) by El-Zanaty Associates (Ministry of Health and Population, 2015).
+
+The EDHS is comprised of two components. The first component is a survey of ever-married women age 15-49 and updated population indicators covered in previous EDHS. The second component is another survey of the general Egyptian population. The general population survey aimed to obtain updated information on critical health problems in Egypt. These problems include the prevalence of hepatits B and C, and experience with non-communicable diseases (Ministry of Health and Population, 2015).
+
+The 2014 EDHS is part of The DHS Program. The DHS Program is a five-year project to assist institutions in collections and analysis of data for planning, monitoring, and evaluating population, health and nutrition (ICF, 2018). The DHS program is funded by ICF in Rockville, Maryland in partnership with Johns Hopkins Bloomberg School of Public Health, the Program for Appropriate Technology in Health (PATH), Avenir Health, Vysnova, Blue Raster, EnCompass, and Kimetrica (ICF, 2018).
+
+This spatial analysis will investigate child mortality rates in Egypt using smoothed direct estimation, focusing on subnational under-five mortality rates (U5MR). This analysis follows closely the methods used in Zehang Richar Li's (2021) vignette, *A Case Study of Estimating Subnational U5MR using Smoothed Direct Methods,* which analyzes U5MR on the Kenya 2014 DHS survey. This vignette shows the application of the model *SUMMER: Small-Area-Estimation Unit/Area Models and Methods for Estimation in R* (Li Z et. al, 2022). We investigated spatial and spatial-temporal smoothing of child mortality rates using smoothed direct estimation.
+
+# Data Description
+
+## EDHS Survey Participants and Characteristics
+
+The EHDS surveyed a nationally representative sample of 21,762 ever-married women (women who were married at least once in their life) in selected households from April 2014 - June 2014. There were 28,175 households interviewed, representing a 99% response rate for ever-married women (Ministry of Health and Population, 2015). The sample design for the 2014 EDHS reports estimates at the national and regional levels. Within these levels the sample design also provides estimates for urban and rural areas.
+
+The table below displays the EHDS survey characteristics. There were no male respondents in this survey.
+
+|                             |                           |
+|-----------------------------|---------------------------|
+| Abortion                    | Early childhood education |
+| Alcohol consumption         | Female genital cutting    |
+| Anemia questions            | GPS/georeferenced         |
+| Anemia testing              | Health insurance          |
+| Anthropometry               | HIV behavior              |
+| Birth registration          | HIV knowledge             |
+| Calendar                    | Iodine salt test          |
+| Child discipline            | Micronutrients            |
+| Child labor                 | Paper survey              |
+| Disability                  | Social marketing          |
+| Domestic violence           | Tobacco use               |
+| Early childhood development | Vitamin A questions       |
+| Women's status              |                           |
+
+: Survey Characteristics
+
+Overall, the EHDS estimates 70% of women age 15-49 are married, and almost 25% are married by age 18. Half of women are married by age 20.8 (MOHP, 2015). Additionally, about one-third of ever-married women are, or have been, married to a relative.
+
+Childhood mortality rates have been declining since the DHS has been surveying Egypt in 1988 (MOHP, 2015). As of 2014, infant mortality rates was 22 death per 1,000 live births, and there are 27 under-five deaths for every 1,000 live births.
+
+## Variables
+
+The 2014 EDHS is representative at two regional levels: 4 regions as groups of admin1 areas, and 25 of the 27 admin1 areas. The Frontier Governorates region is not directly comparable to previous surveys. We will consider the four region groups: frontier governorates, lower Egypt, upper Egypt, and urban governorates.
+
+While in the most standard recode files, the DHS data variable HV001 (cluster number) is equal to the variable HV004 (ultimate area unit), in Egypt the cluster number is 7 digits and the ultimate area unit is only 4 digits. The ultimate area unit is composed of the first 4 digits of the cluster number. HV021 (sampling unit) is equal to the ultimate area unit (HV004). In our spatial analysis, we grouped the lower Egypt rural and urban factors to lower Egypt; similarly, we grouped upper Egypt rural and urban factors to upper Egypt. This is due to the fact DHS Egypt map files boundaries map the four regions, but did not have boundaries for the rural and urban areas. However, we still use the survey weight in our analysis which indicate urban or rural residence; these areas will just not be mapped separately.
+
+We utilized the full birth history data in a format so every row corresponds to a birth and columns that contain:
+
+-   Indicators corresponding to survey design: stratification used in sample design (v023), cluster (v001), and household (v002)
+
+-   Survey weight (v025, type of place of residence: Urban, Rural)
+
+-   Women's individual sample weight (6 decimals)
+
+-   Date of interview in century month codes (CMC) format, i.e., the number of the month since the beginning of 1900 (v008)
+
+-   Date of child's birth in CMC format (b3)
+
+-   Indicator for death of child (b5)
+
+-   Age of death of child in months (b7)
+
+## Data Links
+
+EDHS 2014 Data: [DHS Program Website](https://dhsprogram.com/data/dataset/Egypt_Standard-DHS_2014.cfm?flag=1)
+
+Egypt DHS spatial data: [DHS Spatial Data Repository](https://spatialdata.dhsprogram.com/data/#/single/surveys/indicators/download)
+
+# Methods
+
+## Bayesian space-time smoothing of direct estimates
+
+We first demonstrate the method that smooths the direct estimates of subnational-level U5MR. We specified the time intervals of interest in 5-year intervals from 1985-1990 to 2015-2019). For U5MR, we used discrete survival model to calculate direct estimates for each region and time. This involves breaking down age of each death into the following discrete. We also removed observations that are recorded in time periods after 2014.
+
+Once the data is formatted in person-month, we calculate Horvitz-Thompson estimators which estimates discrete hazards in each interval using logistic regression. To account for survey design, we specified the stratification and cluster variables. In this U5MR Egypt analysis, there are 54 strata as specified in the strata column. In this analysis, we do not account for additional information regarding HIV, which is a limitation.
+
+We fit a model with temporal random effects to smooth national and subnational estimates over the 6 time periods we defined. The smoothed estimates will be calculated with a Random Walk 2 defined on the 5-year period using the smoothDirect function. Additionally, we compare Random Walk 1 and Random Walk 2 models.
+
+# Results
+
+```{r EDHS full birth histories}
+# load DHS full birth histories
+data <- getBirths(data = birthsEgypt,
+                  surveyyear = 2014, strata = c("v023"),
+                  year.cut = seq(1985, 2020, by = 5))
+data <- data[,c("v001", "v002","v024", "time", "age", "v005", "strata", "died")]
+colnames(data) <- c("clustid","id","region","time", "age", "weights", "strata","died")
+head(data)
+```
+
+```{r HT estimators}
+years <- levels(data$time)
+direct0 <- getDirect(births = data, years = years, 
+                     regionVar = "region", timeVar = "time", 
+                     clusterVar = "~clustid + id", ageVar = "age", 
+                     weightsVar = "weights")
+
+## pool lower and upper rural/urban regions to lower and uper egypt tp map with spatial object
+direct0$region[direct0$region == "..le rural"] <- "lower egypt"
+direct0$region[direct0$region == "..le urban"] <- "lower egypt"
+direct0$region[direct0$region == "..ue rural"] <- "upper egypt"
+direct0$region[direct0$region == "..ue urban"] <- "upper egypt"
+
+head(direct0)
+```
+
+## National estimates of Egypt U5MR
+
+We fit a model with temporal random effects to smooth the national estimates over the 6 time periods we defined and project the period 2015-2019. The smoothed estimates will be calculated with a Random Walk 2 defined on the 5-year period using the smoothDirect function. We will fit for the five year interval and a yearly interval, shown in **Figure 1**.
+
+The estimates show a consistent decrease in U5MR, which is approximately around 0.10 - 0.12 in 1985 and around 0.02 as of 2014. The National yearly model estimates slightly higher mortality rates in the 1980s compared the to National period model.
+
+```{r National estimates, include = TRUE, fig.cap="National estimates of U5MR in Egypt", fig.height=5, fig.width=7}
+fit1 <- smoothDirect(data = direct0, Amat = NULL, 
+                     year_label = years, year_range = c(1985,2019), 
+                     time.model = "rw2", m = 1)
+fit2 <- smoothDirect(data = direct0, Amat = NULL, 
+                     year_label = years, year_range = c(1985,2019), 
+                     time.model = "rw2", m = 5)
+out1 <- getSmoothed(fit1)
+out2 <- getSmoothed(fit2)
+
+years.ref <- c(1987, 1992, 1997, 2002, 2007, 2012, 2017)
+
+g1 <- plot(out1, year_med = years.ref) + ggtitle("National period model (5 year)") + ylim(c(0,0.15))
+  
+g2 <- plot(out2, year_med = years.ref) + ggtitle("National yearly model") + ylim(c(0,0.15))
+  
+grid.arrange(g1, g2, ncol=2) + theme(axis.text.x=element_text(angle=45,size = rel(0.5), margin = margin(1, unit = "cm"),vjust =1))
+```
+
+## Subnational estimates of Egypt U5MR
+
+To investigate the subnational estimates of U5MR, we fit a smoothing model similar to the national estimates. We chose four types of space-time interaction terms using the st.type argument in the smoothDirect function (similar to Zehang Richard Li's (2021) vignette) and set the hyper priors to the default PC prior. We estimated the Random Walk 2 random effects on the 5-year period and a yearly scale. The estimates are displayed in **Figure 2**.
+
+The subnational estimates of Egypt show a consistent decrease in U5MR from 1985 to 2014. We see the upper Egypt region in our model is estimated to have higher U5MR over the past few decades than the other three regions (**Figure 2**). The lower and frontier governorates regions of Egypt appear to have similar mortality rates; the urban governorates region estimates are consistently lower than the rest of the regions in our model.
+
+```{r subnational estimates, include = TRUE, fig.cap="Subnational estimates of U5MR in Egypt", fig.height=5, fig.width=7}
+
+fit3 <- smoothDirect(data = direct0, Amat = Amat, year_label = years,
+                     year_range = c(1985,2019), 
+                     time.model = "rw2", type.st = 4, m = 1)
+fit4 <- smoothDirect(data = direct0, Amat = Amat, year_label = years,
+                     year_range = c(1985,2019), 
+                     time.model = "rw2", type.st = 4, m = 5)
+
+out3 <- getSmoothed(fit3)
+out4 <- getSmoothed(fit4)
+
+g1 <- plot(out3) + ggtitle("Subnational period model (5 year)") +
+  ylim(c(0,0.15))
+g2 <- plot(out4) + ggtitle("Subnational yearly model") +
+  ylim(c(0,0.15))
+
+grid.arrange(g1, g2, ncol=2) + theme(axis.text.x=element_text(angle=45,size = rel(0.5), margin = margin(1, unit = "cm"),vjust =1))
+```
+
+**Figure 3** presents the U5MR yearly subnational smoothed estimates compared to direct estimates, indicated by the black dots. The smoothed estimates appear to follow along with the trend of the direct estimates, with some direct estimate "outliers" in mortality rates appearing before the year 2000.
+
+```{r direct est comparison, include = TRUE, fig.cap="Direct estimate comparison of U5MR in Egypt", fig.height=5, fig.width=7}
+plot(out4, data.add = direct0, option.add = list(point = "mean", by = "survey"))+
+  facet_wrap(~region, scales = "free")
+```
+
+The smoothed estimates are mapped onto Egypt over time in 5 year intervals in **Figure 4**. Higher U5 mortality are represented by darker colors. We see significant decreases in U5MR in every 5 year period. The darkest region in the center shows parts of the upper region of Egypt. To visualize uncertainties of the estimates on the maps, please refer to **Figure 6** in the appendix.
+
+```{r map, include = TRUE, fig.cap="Smoothed estimates of U5MR in Egypt over time", fig.height=7, fig.width=7}
+mapPlot(data = subset(out4, is.yearly == FALSE), geo = geo, variables = "years",
+        values = "median", by.data = "region", by.geo = "REGNAME", 
+        is.long =TRUE, ncol = 4, direction = -1, 
+        legend.label = "U5MR", per1000 = TRUE)
+```
+
+## Comparing different models
+
+This section compares models with different prior setup. We focus on the subnational models with yearly temporal resolution. We used random walk of order 2 to model the main temporal trend, and compare different priors for the space-time interaction term. We consider both random walk of order 1 and 2, and PC priors with U=1,5. The RW2 interaction allows the region specific U5MR to follow their own trends with no regulation in their slopes (bottom row of **Figure 5**, frontier governorates and lower egypt estimates cross). The RW1 interaction stays constant after inital observation periods rather than following region-specific trends (top row of **Figure 5**).In this analysis, the posterior is not sensitive to the choice of U (comparing the columns in **Figure 5**).
+
+```{r model comparison, include = TRUE, fig.cap="Model comparison of subnational estimates with yearly temporal resolution", fig.height=5, fig.width=7}
+
+index <- 1
+f.list <- NULL
+est.list <- NULL
+for (model in c("rw1", "rw2")) {
+    for (u in c(1, 5)) {
+        f <- smoothDirect(data = direct0, Amat = Amat, year_range = c(1985,2019),
+            year_label = years, time.model = "rw2", st.time.model = model, m = 5,
+            type.st = 4, pc.st.u = u, pc.st.alpha = 0.01)
+        f.list[[index]] <- f
+        out <- getSmoothed(f)
+        out$st.model <- model
+        out$st.u <- paste("U =", u)
+        est.list <- rbind(est.list, out)
+        index <- index + 1
+    }
+}
+plot(est.list, plot.CI = TRUE) + facet_grid(st.model ~ st.u)
+```
+
+# Discussion
+
+Our analysis shows the estimated U5MR for Egypt have been consistently decreasing over the past few decades. We can visually see differences in estimated mortality rates between regions (**Figure 2**), with the upper region of Egypt having higher U5 mortality rates and the urban governorates consistently having the lowest mortality rates. All the regions have been converging closer as the years progress. There are limitations. We did not account for potential counfounders that could affect the health of the mother and child, such as HIV status and other living conditions. Additionally, even though our model accounts for survey methods and weights which indicate whether a woman lives in an urban area or not, we could not map this feature. Therefore, the estimates mapped onto Egypt may not show variations of mortality rates between northern and southern regions, given the mapped region spans vertically across the map.
+
+\newpage
+
+# References
+
+ICF. 2018. Demographic and Health Surveys Standard Recode Manual for DHS7. The Demographic and Health Surveys Program. Rockville, Maryland, U.S.A.: ICF
+
+Li Z, Martin B, Hsiao Y, Godwin J, Paige J, Gao P, Wakefield J, Clark S, Fuglstad G, Riebler A (2022). \_SUMMER: Small-Area-Estimation Unit/Area Models and Methods for Estimation in R\_. R package version 1.3.0, \<https://CRAN.R-project.org/package=SUMMER\>.
+
+Ministry of Health and Population \[Egypt\], El-Zanaty and Associates \[Egypt\], and ICF International. 2015. Egypt Demographic and Health Survey 2014: Key Findings. Cairo, Egypt and Rockville, Maryland, USA: Ministry of Health and Population and ICF International.
+
+Zehang Richard Li. *A Case Study of Estimating Subnational U5MR using Smoothed Direct Methods.* SUMMER: Small-Area-Estimation Unit/Area Models and Methods forEstimation in R\_. R package version 1.3.0 Vignette. June 05 2021. \<https://cran.r-project.org/web/packages/SUMMER/vignettes/u5mr-vignette.html\>
+
+Spatial Data Repository, The Demographic and Health Surveys Program. ICF International. Funded by the United States Agency for International Development (USAID). Available from spatialdata.dhsprogram.com. \[Accessed 14 March 2023 \]
+
+\newpage
+
+# Appendix
+
+Illustration of uncertainties of the estimates on maps. Uncertainties present as hatching to indicate the width of the 95% posterior credible intervals. Hatching appears the most dense for estimates in the 1980s and early 1990s.
+
+```{r uncertainty, include = TRUE, fig.cap="Estimate 95% posterior credible intervals", fig.height=5, fig.width=7}
+hatchPlot(data = subset(out4, is.yearly == FALSE), geo = geo, variables ="years",
+          values = "median", by.data = "region", by.geo = "REGNAME", 
+          lower = "lower", 
+          upper = "upper",
+          is.long = TRUE, direction = -1, 
+          legend.label = "U5MR", per1000 = TRUE, ncol = 4)
+```
+
+## 
