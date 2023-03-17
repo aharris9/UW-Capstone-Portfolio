@@ -1,0 +1,157 @@
+---
+title: 'Seattle Public Library Checkouts'
+author: "Alexis Harris"
+date: "`r Sys.Date()`"
+output: 
+  beamer_presentation:
+        theme: "Berlin"
+        colortheme: "dolphin"
+        fonttheme: "structurebold"
+---
+
+```{r setup, include=FALSE}
+#rm(list=ls())
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE)
+```
+
+```{r, include=FALSE}
+library(tidyverse)
+library(reshape2)
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(zoo)
+library(rigr)
+```
+
+```{r Whole dataset, include=FALSE}
+checkouts_data <- read_csv("~/Documents/UW Classes/Year 1/Spring22/Biost 579/Project/datasets/Checkouts_by_Title.csv")
+
+```
+
+```{r 20_22 data, include=FALSE}
+checkouts20_22 <- subset(checkouts_data, CheckoutYear >= 2020, select = c(UsageClass, CheckoutYear, CheckoutMonth, Checkouts, Title))
+
+checkouts20_22 <- checkouts20_22[complete.cases(checkouts20_22), ]
+```
+
+```{r Sample20_22, include=FALSE}
+checkouts20_22 <- within(checkouts20_22, {
+    UsageClass <- factor(UsageClass)
+})
+# Add Date column (for exploratory analysis)
+checkouts20_22$Date <- as.Date(paste(checkouts20_22$CheckoutMonth,"06",checkouts20_22$CheckoutYear,sep="/"), "%m/%d/%y")
+                               
+Sample20_22 <- checkouts20_22[sample(nrow(checkouts20_22), 2500), ] # pick 5000 random rows from dataset
+```
+
+## Background
+
+The Seattle Public Library created a dataset that includes a monthly count of Seattle Public Library checkouts by title
+
+-   Began in April 2005
+-   Approx. 39.9 million entries by title
+-   Updated Monthly
+-   11 recorded variables per checkout
+
+## Scientific Questions
+
+How has society prioritizing staying at home impacted the number of digital or physical checkouts from the Seattle Public Library?
+
+-   *Primary Analysis*: Between January 1st 2020 to May 6th 2022 is there difference in checkout rates between the physical and digital checkouts at the The Seattle Public Library?
+
+-   *Secondary Analysis*: Is there difference in checkout rates between the physical and digital checkouts at the The Seattle Public Library on a year to year basis (i.e. 2012 to 2022)?
+
+## Models
+
+Model 1: $\hat{log}(E[Checkouts_i | ItemCheckedOut]) = \beta_0 + \beta_1 1_{[UsageClass_i = Physical]}$
+
+Model 2: $\hat{log}(E[\frac{Checkouts_i)}{Year_i} | ItemCheckedOut]) = \beta_0 + \beta_1 1_{[UsageClass_i = Physical]}$
+
+## Exploratory Analysis
+
+```{r Table 1, include=TRUE}
+# Summary table
+knitr::kable(summary(checkouts20_22[, c("UsageClass", "Checkouts")]),
+             caption = "Summary of data from 2020 to 2022")
+```
+
+## Exploratory Analysis
+
+```{r Graph 1, echo=FALSE, include=TRUE,fig.width=5, fig.height=3, fig.cap="Proportion of checkouts by year"}
+### -----------------------------------------------------------
+### Graphs
+ggplot(Sample20_22, aes(CheckoutMonth, fill=UsageClass)) +
+ geom_histogram(binwidth=1/12, position="fill") +
+ facet_wrap(vars(Sample20_22$CheckoutYear), ncol = 3)
+```
+
+## Exploratory Analysis
+
+```{r Graph 2, include=TRUE, echo=FALSE, fig.width=6, fig.height=3, fig.cap="Violin Plot"}
+### -----------------------------------------------------------
+### Graphs
+ggplot(Sample20_22, aes(Date, Checkouts)) +
+  geom_violin() +
+  coord_flip() +
+  geom_jitter(size=1.5) +
+  scale_y_log10() +
+  #scale_x_date() + 
+  stat_smooth(aes(x = Date, y = Checkouts, group=1), method="loess")
+  ggtitle("Checkouts per title in 2020 to 2022")
+
+```
+
+## Primary Analysis
+
+```{r Primary Analysis, include=TRUE}
+# Primary Analysis
+poisson1_rigr <- checkouts20_22 %>%
+  regress("rate", Checkouts ~ UsageClass,
+                      data = .)
+
+mod1_table <- (poisson1_rigr %>% coef)[,c("e(Est)","Robust SE", "e(95%L)", "e(95%H)", "Pr(>|t|)")] %>% round(3)
+
+rownames(mod1_table)[2] <- "UsgClsPhy"
+
+knitr::kable(mod1_table,
+             caption = "Poisson Model for Primary Analysis")
+```
+When comparing two items that were checked out from the Seattle Public Library from January 2020 to May 2022, we estimate that the checkout count in the items that are physical will be 0.695 times the count in the earlier strata (i.e. 30.5% lower) with a 95% robust Wald-based confidence interval of (0.691 0.698). We reject the the null hypothesis (at the 5% level) that the checkouts monthly rates by type of item (physical or digital) are equal (robust Wald p < 0.00005).
+
+## Secondary Analysis
+
+```{r Seconday Analysis Data, include=FALSE}
+# Create subset for secondary analysis
+checkouts12_22 <- subset(checkouts_data, CheckoutYear >= 2012, select = c(UsageClass, CheckoutYear, CheckoutMonth, Checkouts, Title))
+
+checkouts12_22 <- checkouts12_22[complete.cases(checkouts12_22), ]
+
+checkouts12_22 <- within(checkouts12_22, {
+    UsageClass <- factor(UsageClass)
+})
+```
+
+```{r Secondary Analysis, include=TRUE}
+# Secondary Analysis with year offset from 2012-2022
+poisson2_rigr <- checkouts12_22 %>%
+  regress("rate", Checkouts ~ UsageClass,
+                     offset = log(CheckoutYear), data = .)
+
+mod2_table <- (poisson2_rigr %>% coef)[,c("e(Est)","Robust SE", "e(95%L)", "e(95%H)", "Pr(>|t|)")] %>% round(3)
+
+rownames(mod2_table)[2] <- "UsgClsPhy"
+
+knitr::kable(mod2_table,
+             caption = "Poisson Model for Secondary Analysis 2012-2022")
+
+```
+When comparing two items that were checked out from the Seattle Public Library from January 2012 to May 2022, we estimate that the checkout rate in the items that are physical will be 1.206 times the rate in the of digital checkouts (i.e. 20.6% higher) with a 95% robust Wald-based confidence interval of (1.204 1.209). We reject the the null hypothesis (at the 5% level) that the checkouts yearly rates by type of item (physical or digital) are equal (robust Wald p < 0.00005).
+
+## Conclusion & Limitations
+
+-   Extreme dispersion of 1's -- doesn't fit Poisson Distribute well
+
+-    Negative binomial model will be better to use
+
+-   Cannot draw causal inference

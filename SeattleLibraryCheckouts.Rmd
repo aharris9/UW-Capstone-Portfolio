@@ -1,0 +1,230 @@
+---
+title: "Seattle  Public Library Checkouts"
+author: "Alexis Harris"
+date: "June 8 2022"
+output:
+  pdf_document
+---
+
+```{r setup, include=FALSE}
+### Setting up the packages, options we'll need:
+library(knitr)
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE)
+```
+
+```{r, include=F}
+### -----------------------------------------------------------
+# Note: You will likely need to modify this command depending on your local file structure. 
+library(tidyverse)
+library(reshape2)
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(zoo)
+library(rigr)
+
+```
+
+```{r Total Dataset, include = FALSE}
+checkouts_data <- read_csv("~/Documents/UW Classes/Year 1/Spring22/Biost 579/Project/datasets/Checkouts_by_Title.csv")
+```
+
+```{r 20_22 data, include=FALSE}
+checkouts20_22 <- subset(checkouts_data, CheckoutYear >= 2020, 
+                         select = c(UsageClass, CheckoutYear, 
+                                    CheckoutMonth, Checkouts, Title))
+
+checkouts20_22 <- checkouts20_22[complete.cases(checkouts20_22), ]
+```
+
+```{r Sample20_22, include=FALSE}
+checkouts20_22 <- within(checkouts20_22, {
+    UsageClass <- factor(UsageClass)
+})
+# Add Date column (for exploratory analysis)
+checkouts20_22$Date <- as.Date(paste(checkouts20_22$CheckoutMonth,"06",
+                                     checkouts20_22$CheckoutYear,sep="/"),
+                               "%m/%d/%y")
+                               
+Sample20_22 <- checkouts20_22[sample(nrow(checkouts20_22), 2500), ] 
+# pick 2500 random rows from dataset
+```
+
+### Abstract
+
+In this statistical project, we investigate the rate between checkouts of physical items and digital items at the Seattle Public Library. In our primary analysis, we want to determine if the rate between physical and digital checkouts is statistically different in correlation with the COVID-19 pandemic, public safety regulations, and lock-downs. In the secondary analysis, we will investigate the yearly rates of checkouts between digital and physical items from 2012 to 2022 in order to observe the trends of checkouts in the last decade. To investigate these counts, we will use poisson regression to answer our questions. From 2020 to 2022, we observe a 30.5% lower count of physical checkouts in a given month compared to digital checkouts. In a year by year rate from 2012 to 2022, we observe a 20.6% higher rate in physical checkouts compared to digital checkouts. While we learn that the data ends up not fitting the poisson distribution well and thus does not give substantial statistical power, the coefficients to these models are interesting to observe, and we will consider different count regression models that we can make us of in the future.
+
+### Introduction
+
+City of Seattle Open Data provides a plethora of data published by the City Departments available to the public to discover, analyze, and download. On the website people can find public datasets on different subjects involving Seattle. One of the datasets on this website is the Checkouts by Title dataset. This data is collected by the Seattle Public Libraries and tracks the count of checkouts per month. This is an intriguing dataset because it is a record of all of the checkouts libraries in Seattle have had since 2005. It is important that they keep this data updated so that the public can view the trends of checkouts in public libraries. Libraries are a wonderful resource of information and a safe location to study, relax, go on the public computers, and join clubs and participate in events. It is important as a society to keep these public resources well funded and available -- we would lose a great amount of resources without libraries. Libraries have always provided physical copies of books, movies, and CDs as well as digital copies of these items.
+
+This interesting data set provides the opportunity to investigate how the count of monthly checkouts has been impacted by COVID-19. Specifically, we will investigate the to see if there is a difference between the count of checkouts between physical items and digital items.
+
+#### Questions of Interest
+
+Exploring the trends of checkouts is a natural question given the recorded data. Trends in checkouts may be impacted by world events -- such as pandemics. Since the COVID-19 pandemic, public facilities and businesses closed in-person activities. We can investigate how COVID-19 mandates may have impacted library checkouts. We can further look into the exact months these mandates were applied and see if there is correlation with the trends in the data. Our primary analysis will be to investigate if trends in checkouts over time differ for different checkout types -- digital or physical.
+
+-   *Primary Analysis*: Between January 1st 2020 to March 6th 2022 is there difference in checkout rates between the physical and digital checkouts at the The Seattle Public Library?
+
+-   *Secondary Analysis*: Is there difference in checkout rates between the physical and digital checkouts at the The Seattle Public Library on a year to year basis (i.e. 2012 to 2022)?
+
+### Data Set Description
+
+The Checkouts by Title data set includes a monthly count of Seattle Public Library checkouts by title for physical and electronic items beginning. The public libraries began recording this data in April 2005. It does not include if the item was checked back in. This dataset is updated monthly around the 6th. As of now, there are 39,904,304 records of checkouts. There are 11 columns in the dataset:
+
+-   UsageClass: Character -- Denotes if item is "physical" or "digital"
+-   CheckoutType: Character -- Denotes the vendor tool used to check out the item.
+-   MaterialType: Character -- Describes the type of item checked out (examples: book, song movie, music, magazine)
+-   CheckoutYear: Numeric -- The 4-digit year of checkout for this record.
+-   CheckoutMonth: Numeric -- The month of checkout for this record.
+-   Checkouts: Numeric -- A count of the number of times the title was checked out within the "Checkout Month".
+-   Title: Character -- The full title and subtitle of an individual item
+-   Creator: Character -- The author or entity responsible for authoring the item.
+-   Subjects: Character -- The subject of the item as it appears in the catalog
+-   Publish: Character -- The publisher of the title
+-   PublicationYear: Character -- The year from the catalog record in which the item was published, printed, or copyrighted.
+
+Counts of titles of checkouts at the Seattle Public Library has been collected and compiled monthly since 2005. Data is recorded on a title checkout. For example, a digital copy of *Harry Potter and the Sorcerer's Stone* could have been checked out 100 times in May of 2015. However, this data does not collect counts on if the book was not checked out that month. So if *Harry Potter and the Sorcerer's Stone* was not checked out in June, then we would not have this zero count.
+
+### Statistical Methods
+
+#### Description of Study Design
+
+Given this data is collected as observational counts of checkouts per month, we will use a regression model for count data. We also need to consider the potential issue of have no 'zeros' in our dataset. We can approach this two different ways: simulate the zeros into the data set based off of unique entries and then run a regression model for count data or use a conditional poisson model. In the latter case, a book will not appear in the data if it is not checked out at all as books in this data set must have a minimum of one checkout entry to be represented. Given that I want to explore utilizing poisson model on count data and creating zeros in this dataset is computationally rigorous, I will use a poisson model.
+
+##### Models and Methods
+
+Primary Analysis: $\hat{log}(E[Checkouts_i | ItemCheckedOut]) = \beta_0 + \beta_1 1_{[UsageClass_i = Physical]}$
+
+Secondary Analysis: $\hat{log}(E[\frac{Checkouts_i)}{Year_i} | ItemCheckedOut]) = \alpha_0 + \alpha_1 1_{[UsageClass_i = Physical]}$
+
+In the primary analysis, we are investigating the estimated number of checkouts, $E[Checkouts_i|ItemCheckedOut]]$ as our response variable. Our parameter of interest is $\beta_1$ which is the additional estimated difference between physical checkouts and digital checkouts and $1_{[UsageClass_i = Physical]}$ is an indicator variable that denotes whether a checked out item is physical or digital with $1_{[UsageClass_i = Physical]} = 1$ indicating physical item. We will use robust standard errors for the Wald test at the $\alpha = 0.05$ significance level to test the null hypothesis of $\beta_1 = 0,$ observing no difference in checkout rates between digital and physical copies. We will use robust standard errors since we are not sure if the rates of checkouts are Poisson distributed (assumption that the variance is equal to the mean).
+
+In the secondary analysis we are investigating the estimated number of checkouts offset by year, $E[\frac{Checkouts_i)}{Year_i} | ItemCheckedOut]$ as our response variable. Our parameter of interest is $\alpha_1$ which is the additional estimated difference between physical checkouts and digital checkouts and similarly $1_{[UsageClass_i = Physical]}$ is an indicator variable that denotes whether a checked out item is physical or digital. We will use robust standard errors for the Wald test at the $\alpha = 0.05$ significance level to test the null hypothesis of $\alpha_1 = 0,$ observing no difference in checkout rates between digital and physical copies on a year by year basis. We will use robust standard errors.
+
+The RStudio package we will utilize in order to run a poisson model and use Wald type robust standard errors is the rigr package. Application of this process can be found in the Appendix.
+
+#### Exploratory Analysis
+
+The following tables and figures present exploratory analyses of the data. Table 1 displays a description of checkouts between 2020 to 2022. There are approximately 510,381 more digital checkouts than physical checkouts in this time frame. We also note that the median number of checkouts within the last few years is two checkouts per title and that the max number of checkouts within a given month is 4,903.
+
+Figure 1 displays a histogram and figure 2 displays a violin plot of the data. This two figures show us that there is an over dispersion of 1's indicating that the data is not necessarily poisson distributed. In figure 1 we see that there are over 2,000,000 titles that were checked between 2020 and 2022. In figure two we see that the density of numbers of checkouts for a given title is centered at 1 and then quickly disperses.
+
+Figure 3 shows the proportion of checkouts by usage class for each month between 2020 to March 2022. This is a helpful visual to see proportional trends in our data. We see that there were only digital checkouts from April 2020 to July 2020 due to Libraries closing to in-person activities. After these months, we see a steady increasing trend in physical checkouts.
+
+```{r Table 1, include=TRUE}
+### -----------------------------------------------------------
+### Subsets of the data
+knitr::kable(summary(checkouts20_22[, c("UsageClass", "Checkouts")]),
+             caption = "Summary of data from 2020 to 2022")
+```
+
+```{r Graph 1, echo=FALSE, fig.width=5, fig.height=5, fig.cap="Frequency of checkouts subgrouped by type of checkout in 2020", include=TRUE}
+### -----------------------------------------------------------
+### Graphs
+## Histogram
+ggplot(data=checkouts20_22, 
+      aes(Checkouts, fill = UsageClass)) +
+      geom_histogram(binwidth=.1) + 
+      scale_x_log10() +
+      xlab("Checkouts per book") + ylab("Count") + theme_bw() +
+      ggtitle("Checkouts per title in 2020 to 2022")
+```
+
+```{r Graph 2, include=TRUE, echo=FALSE, fig.width=5, fig.height=5, fig.cap="Violin Plot", warning=FALSE}
+### -----------------------------------------------------------
+### Graphs
+# Height_Weight_Data sample data frame; selecting a random subset in r
+
+ggplot(Sample20_22, aes(Date, Checkouts)) +
+  geom_violin() +
+  coord_flip() +
+  geom_jitter(size=1.5) +
+  scale_y_log10() +
+  scale_x_date() + 
+  stat_smooth(aes(x = Date, y = Checkouts, group=1), method="loess") +
+  ggtitle("Checkouts per title in 2020 to 2022")
+```
+
+```{r Graph 3, echo=F, include=TRUE,fig.width=5, fig.height=5, fig.cap="Frequency of checkouts subgrouped by type of checkout in 2022"}
+### -----------------------------------------------------------
+### Graphs
+ggplot(Sample20_22, aes(CheckoutMonth, fill=UsageClass)) +
+ geom_histogram(binwidth=1/12, position="fill") +
+ facet_wrap(vars(Sample20_22$CheckoutYear), nrow = 3) +
+  ggtitle("Proportion of Checkouts/month in 2020 to 2022")
+ 
+```
+
+\newpage
+
+### Results
+
+The results of our statistical analysis are presented in the following tables below.
+
+#### Primary Analysis
+
+```{r Primary Analysis, include=TRUE}
+# Primary Analysis
+poisson1_rigr <- checkouts20_22 %>%
+  regress("rate", Checkouts ~ UsageClass,
+                      data = .)
+
+mod1_table <- (poisson1_rigr %>% coef)[,c("e(Est)","Robust SE", 
+                                          "e(95%L)", "e(95%H)", "Pr(>|t|)")] %>% round(3)
+
+rownames(mod1_table)[2] <- "UsgClsPhy"
+
+knitr::kable(mod1_table,
+             caption = "Poisson Model for Primary Analysis")
+```
+
+When comparing two items that were checked out from the Seattle Public Library from January 2020 to May 2022, we estimate that the checkout count in the items that are physical will be 0.695 times the count in the earlier strata (i.e. 30.5% lower) with a 95% robust Wald-based confidence interval of (0.691 0.698). We reject the the null hypothesis (at the 5% level) that the checkouts monthly rates by type of item (physical or digital) are equal (robust Wald p \< 0.00005).
+
+#### Secondary Analysis
+
+```{r Seconday Analysis Data, include=FALSE}
+# Create subset for secondary analysis
+checkouts12_22 <- subset(checkouts_data, CheckoutYear >= 2012, 
+                         select = c(UsageClass, CheckoutYear,
+                                    CheckoutMonth, Checkouts, Title))
+
+checkouts12_22 <- checkouts12_22[complete.cases(checkouts12_22), ]
+
+checkouts12_22 <- within(checkouts12_22, {
+    UsageClass <- factor(UsageClass)
+})
+```
+
+```{r Secondary Analysis, include=TRUE}
+# Secondary Analysis with year offset from 2012-2022
+poisson2_rigr <- checkouts12_22 %>%
+  regress("rate", Checkouts ~ UsageClass,
+                     offset = log(CheckoutYear), data = .)
+
+mod2_table <- (poisson2_rigr %>% coef)[,c("e(Est)","Robust SE", 
+                                          "e(95%L)", "e(95%H)", "Pr(>|t|)")] %>% round(3)
+
+rownames(mod2_table)[2] <- "UsgClsPhy"
+
+knitr::kable(mod2_table,
+             caption = "Poisson Model for Secondary Analysis 2012-2022")
+
+```
+
+When comparing two items that were checked out from the Seattle Public Library from January 2012 to May 2022, we estimate that the checkout rate in the items that are physical will be 1.206 times the rate in the of digital checkouts (i.e. 20.6% higher) with a 95% robust Wald-based confidence interval of (1.204 1.209). We reject the the null hypothesis (at the 5% level) that the checkouts yearly rates by type of item (physical or digital) are equal (robust Wald p \< 0.00005).
+
+### Discussion
+
+In our primary analysis we found that the count of physical items will be approximately 30.5% lower on average than the count of digital checkouts between 2020 and 2022. This could be due to a plethora of different factors and while we find this association to be statistically significant in our poisson model, there are limitations. We see visually in figure 1 and figure 2 that there is and extreme dispersion of 1's which indicated that the data is not poisson distributed thus violating a poisson regression model assumption. While we used robust standard errors, I think the dispersion will impact the confidence intervals.
+
+Interestingly in our secondary analysis we saw a 20.6% higher rate of physical checkouts than digital checkouts in a year to year basis from 2012 to 2022. For exploratory purposes, it is interesting to know that the COVID-19 pandemic and resulting public safety regulations ultimately did not impact the rates of checkouts between physical and digital items within the last ten years in our model.
+
+Due to the limitations of the poisson regression model, a potential model that would be a better fit is the negative binomial regression. The Negative binomial regression is a generalization of poisson regression with less restrictive assumptions that the variance is equal to the mean. In future analyses for count data, I will certainly learn about and investigate using a negative binomial regression model given that the assumptions of poisson regression can be limiting to an analysis. Despite not having any statistical relevance, learning about poisson regression and how to handle large quantities of data was insightful for my learning goals.
+
+\newpage
+
+### Code Appendix
+
+```{r, ref.label=knitr::all_labels(),echo=TRUE,eval=FALSE}
+```
