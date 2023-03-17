@@ -1,2 +1,3 @@
 # UW-Capstone-Portfolio
-University of Washington biostatistics capstone portfolio
+
+This portfolio contains data analysis projects completed in R Studio throughout the University of Washington Biostatistic Capstone program (2021-2023).
