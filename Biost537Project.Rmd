@@ -1,0 +1,186 @@
+---
+title: "Biost/Epi 536 Data Analysis Project"
+author: "Group 11"
+date: "`r Sys.Date()`"
+output: pdf_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+#Use opts_chunk$set() to set global knit options for this document
+knitr::opts_chunk$set(echo=FALSE, include = FALSE, message=FALSE, warnings=TRUE, fig.align='center')
+
+#Load packages
+library(tidyverse) #for ggplot2, dplyr, etc
+library(kableExtra) #for making nice-looking tables
+library(rigr)
+library(purrr)
+library(tableone) # an useful package to generate descriptive tables
+library(Hmisc) # mainly used for its "label" function
+
+#Set working directory
+#setwd("C:/Users/Alexis/Documents/R Scripts") #windows
+setwd("/Users/alexisharris/Documents/R Studio/Biost 536") #mac
+
+
+#r, echo=F, fig.width=5, fig.height=5, fig.cap="An example of a scatterplot" 
+```
+
+```{r, include=F}
+### -----------------------------------------------------------
+### Reading in the data. 
+# Note: You will likely need to modify this command depending on your local file structure. 
+
+# read in data
+load("") # cannot include confidential data
+dap <- ccdogs_male
+
+```
+
+```{r, include=FALSE}
+### -----------------------------------------------------------
+### Modify Dataset
+
+# purebred variable changed
+dap$pure_breed <- ifelse(dap$pure_or_mixed_breed == 1, 1, 0)
+# re-code neuter status to a binary variable
+dap <- dap %>% mutate(neutered=ifelse(neutered == "True", 1, 0))
+# This will be used for logisitc regression
+
+```
+
+## Background
+
+The thyroid is an important gland found in the throat that regulates hormones. Dogs can develop hypothyroidism, a condition when the thyroid does not produce sufficient hormones. Golden retrievers and Doberman Pinschers, which are pure bred dogs, are at greater risk for developing hypothyroidism. While previous research has indicated that spayed females are at greater risk for hypothyroidism than sexually intact females, further research is needed for male dogs.
+
+## Study Design
+
+This study is a case-control study using data from a large veterinary system to investigate the association between spay/neuter status and hypothyroidism in male dogs. The study included male dogs aged 3 to 15 years of age, with 3 controls sampled for every case resulting in a sample size of 920 dogs. Hypothyroidism status, age (years), weight (lbs), breed (Golden Retriever, Labrador Retriever, Mixed, and Other Pure Breed), and an indicator for pure breed (Pure or Mixed) were collected. Descriptive statistics can be found in Table 1.
+
+## Statistical Methods
+
+To investigate the association between neuter status and hypothyroidism in male dogs, we fit a logistic regression model to assess the odds of hypothyroidism based on neuter status. Our model adjusted for age as a continuous variable and breed as a binary variable (mixed or pure breed). Age was chosen as a covariate because older dogs are more likely to be neutered, and age also may be associated with hypothyroidism. Breed status (pure or mixed) was chosen as a covariate due to hypothyroidism being more common in certain pure breeds, and mixed breed dogs may be more likely to be neutered. Despite knowing specific pure breeds are at higher risk of hypothyroidism, particularly Dobermans, specific breed was not used as a covariate in our analysis, given the study did not collect information for pure breeds other than Golden Retrievers and Labradors. The analysis used robust Wald type confidence intervals.
+
+## Results
+
+Data were available for 920 male dogs, including 230 cases with hypothyroidism and 690 controls. The mean age among cases was 10.3 years (standard deviation, SD, 3 years) and among controls was 8.4 years (SD 3.2 years). Among cases, 206 dogs (90%) were neutered and 124 dogs (54%) were purebred, and among controls, 642 dogs (93%) were neutered and 347 dogs (50%) were purebred (Table 1). Based on a logistic regression model adjusting for age and breed (pure or mixed), we estimate the odds of developing hypothyroidism for male dogs that are neutered are 0.46 (95% CI: 0.26-0.83, Wald test p-value = 0.009) times the odds of developing hypothyroidism for male dogs that are not neutered. This provides statistically significant evidence at the $\alpha = 0.05$ significance level to reject the null hypothesis that male dogs that have been neutered and those that have not have the same odds of developing hypothyroidism. Table 2 presents the estimated coefficents and 95% confidence interval for the parameters in our model.
+
+## Discussion
+
+In contrast to similar studies done in female dogs, sexually intact (non-neutered) male dogs were found to have higher odds of hypothyroidism compared to neutered male dogs. A strength of this study included using the veterinary system to get a large, diverse sample of male dogs. Given the case control study design and sample size, these findings are generalizable to the population. A limitation is that odds ratios are not as useful for dog owners as relative risk or risk difference when deciding to neuter. Since the case control design of the study does not allow us to look at causality between neutering and hypothyroidism, an experimental study should be conducted. Future research should consider additional factors such as specific dog breeds prone to hypothyroidism, diet, genes, or environment.
+
+```{r, include=FALSE, appendix = TRUE, warning=FALSE}
+### -----------------------------------------------------------
+### Create Table 1: Descriptive Statistics 
+
+tab1_data <- read.csv('Datasets/hypothyroid_study.csv',header=TRUE)
+tab1_data <- subset(tab1_data, select = -c(female, breed) )
+
+# data pre-processing
+# Categorical variables as factors with meaningful labels
+tab1_data$case <- factor(tab1_data$case, c(1,0), c("Case", "Control"))
+
+tab1_data$neutered <- factor(tab1_data$neutered,c('TRUE','FALSE'),c('Neutered',
+                                                         'Intact'))
+#tab1_data$breed <- factor(tab1_data$breed,c('mixed','golden','labrador','other'),
+                          #c('Mixed','Golden Retriever','Laborador','Other'))
+
+tab1_data$pure_or_mixed_breed <- factor(tab1_data$pure_or_mixed_breed,c(1,2),c("Pure Breed", "Mixed Breed"))  
+
+# Continuous variables, always inspect their distributions
+hist(tab1_data$age)
+hist(tab1_data$weight) #skewed - so median IQR
+
+# Label each variable reported in Table 1 using the function label from Hmisc package
+var_for_table1 <- c('case','age','neutered','weight','pure_or_mixed_breed')
+label(tab1_data[,var_for_table1]) <- list('Hypothyroidism',
+                                              'Age (years)',
+                                              'Neutered Status',
+                                              'Weight (lbs)',
+                                          'Classification of Pure or Mixed Breed')
+# Note that this is a list of labels
+# You may notice I used $ $. This is to let rmarkdown know the text inside is
+# a formula
+
+```
+
+## Tables
+
+```{r Table 1,include=TRUE, appendix = TRUE, warning=FALSE}
+
+# Table 1 was generated by using the CreateTableone function from the package
+# "tableone". We could specify 
+# data: specific the dataset 
+# vars: variable (column names) to be included in the table
+# strata: whether or not stratifying by any factors
+# test: whether or not statistical test is performed
+# includeNA: whether or not NA category is displayed
+# addOverall: whether or not descriptive statistics from the overall sample is included
+# there are other parameters of the table that can be controlled when printing 
+# the table e.g. whether or not to use variable labels rather than variable column
+# names we specified, any nonnormal variables (so median [IQR] is reported), and
+# the number of digits, etc. See R documentation ?CreateTableOne and 
+# ?print.TableOne for details.
+
+tbl1 <- CreateTableOne(data = tab1_data, vars = var_for_table1[-1], strata = 'case',
+                       test = FALSE, includeNA = TRUE, addOverall = TRUE) %>% 
+  print(printToggle = FALSE,varLabels = TRUE, nonnormal = c('weight'),contDigits = 1, 
+        catDigits = 0)
+rownames(tbl1) <- gsub('%','\\\\%',rownames(tbl1)) # rmarkdown knits PDF based on
+# Latex, qnd signs like %, $, \ have special meaning in Latex. To let Latex display
+# these characters, we need to add \\\\ before those characters.
+rownames(tbl1)[1] <- 'N'
+# rownames(tbl1)[11] <- ' Missing'
+
+# kable is a powerful function to display tables using Rmarkdown.
+# We could specify that
+# "format = latex": since the output is PDF 
+# "align = c" means texts in the table are centered aligned
+# "vline = ''" means no vertical lines are present in the table
+# escape = FALSE means special characters like %, $ are treated as Latex code.
+# linesep = '' means we don't want any spacing between two rows of the table.
+# For those who wants to learn more about how to nicely display a table by
+# using Rmarkdown, please check a very useful resources 
+# "https://bookdown.org/yihui/rmarkdown-cookbook/kable.html"
+
+kable(tbl1, format = 'latex', align = 'c', vline = '',booktabs = TRUE, caption = 
+        'Baseline characteristics of the study sample, overall and by disease, Hypothyroidism.
+      Data are summarized as mean (SD) (or median [IQR] for skewed distributions) 
+      for continuous variables and count (\\%) for categorical variables.',
+      escape = FALSE,linesep = "") %>%
+    add_header_above(c(' ' = 2,'Hypothyroidism' = 2),bold = TRUE) %>%
+    # add header
+    add_indent((1:nrow(tbl1))[substr(rownames(tbl1),1,1) == ' ']) %>% 
+    # add some indents for those categorical variables
+    kable_styling(latex_options = c('scale_down','HOLD_position')) %>% 
+    # "scale down" automatically choose the size of the table to best fit the page
+    footnote(general = 
+    'Descriptive statistics for Golden Retreiver and Laborador ommitted',
+    threeparttable = TRUE)
+    # add footnote
+```
+
+```{r Table 2, include = TRUE}
+### -----------------------------------------------------------
+### Run Logisitic Regression
+
+dap_reg <- regress("odds", case~neutered+age+pure_breed, data = dap)
+
+results = data.frame(estimate = coef(dap_reg)[,1],
+                     exp_estimate = coef(dap_reg)[,4],
+                     robust_SE = coef(dap_reg)[,3],
+                     exp_CI_lower = coef(dap_reg)[,5],
+                     exp_CI_upper = coef(dap_reg)[,6])
+                     #p = coef(dap_reg)[,8])
+
+row.names(results) = c("Intercept", "Neutered", "Age (Years)", "Pure Breed")
+colnames(results) <- c("Estimate", "Exp. Estimate", "Robust SEs", "Exp 95%CI Lower", "Exp 95%CI Upper")
+
+kable(round(results,2), caption="Results performing log-regression relating hypothyroidism to neuter status, adjusting on age, purebreed status") %>%
+  kable_styling(latex_options="HOLD_position")#print kable with results rounded to 2 decimal places
+```
+
+```{r code appendix, ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE}
+```
